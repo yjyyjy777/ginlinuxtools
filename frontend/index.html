@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UEM Deployment Tools</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+    <header>
+        <div id="theme-switcher" title="切换主题">
+            <svg id="theme-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+        </div>
+    </header>
+
+    <main id="main-grid">
+
+        <section id="config-card" class="card">
+            <h2>连接与配置</h2>
+
+            <div class="form-group">
+                <label for="history">历史记录:</label>
+                <select id="history">
+                    <option value="">选择一个已保存的连接...</option>
+                </select>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group half-width">
+                    <label for="ip">IP 地址:</label>
+                    <input type="text" id="ip" value="172.16.10.151" placeholder="例如: 172.16.10.151">
+                </div>
+
+                <div class="form-group half-width password-wrapper">
+                    <label for="password">密码:</label>
+                    <input type="password" id="password" placeholder="请输入密码">
+                    <span id="togglePassword" class="toggle-password"></span>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group half-width">
+                    <label for="user">用户:</label>
+                    <input type="text" id="user" value="root">
+                </div>
+                <div class="form-group half-width">
+                    <label for="sshPort">SSH 端口:</label>
+                    <input type="text" id="sshPort" value="22">
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group half-width">
+                    <label for="localPort">本地访问端口:</label>
+                    <input type="text" id="localPort" value="9999">
+                </div>
+                <div class="form-group half-width">
+                    <label for="remotePort">远端监听端口:</label>
+                    <input type="text" id="remotePort" value="9898">
+                </div>
+            </div>
+        </section>
+
+        <section id="status-card" class="card">
+            <h2>状态与操作</h2>
+
+            <div class="status-area">
+                <div class="status-indicator" id="statusIndicator"></div>
+                <p id="statusMessage">准备就绪...</p>
+            </div>
+
+            <div class="button-group">
+                <button id="startButton" class="btn primary">部署</button>
+                <button id="browserButton" class="btn" disabled>浏览</button>
+                <button id="stopButton" class="btn danger" disabled>停止</button>
+            </div>
+        </section>
+
+    </main>
+</div>
+
+<script src="/wails/runtime.js"></script>
+<script src="main.js"></script>
+</body>
+</html>
