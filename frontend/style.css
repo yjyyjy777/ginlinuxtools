@@ -129,45 +129,41 @@ header {
 .form-row { display: flex; flex-direction: row; gap: 0.7rem; }
 .half-width { flex: 1; }
 
-/* --- 🌟 关键修复：密码框样式 --- */
+/* --- 密码框样式 --- */
+.password-wrapper {
+    position: relative;
+}
 
-/* 1. 隐藏浏览器默认的密码查看按钮 (防止双眼) */
+/* 隐藏浏览器默认的密码查看按钮 */
 input[type="password"]::-ms-reveal,
 input[type="password"]::-ms-clear {
     display: none;
 }
-
-/* 2. 容器样式 */
-.password-wrapper {
-    position: relative;
-    display: flex;
-    flex-direction: column;
+input[type="password"]::-webkit-reveal {
+    display: none;
 }
 
-/* 3. 输入框留出右侧空间 */
-.password-wrapper input {
-    padding-right: 32px;
+
+.password-wrapper input[type="password"],
+.password-wrapper input[type="text"] {
+    padding-right: 35px; /* 为图标留出空间 */
 }
 
-/* 4. 自定义图标定位 */
 .toggle-password {
     position: absolute;
-    right: 8px;
-    /* 这里的 calc(50% + 9px) 是为了抵消 label 的高度，让图标垂直居中于 input 区域 */
-    top: calc(50% + 9px);
+    right: 10px;
+    top: 50%;
     transform: translateY(-50%);
     cursor: pointer;
-    user-select: none;
     color: var(--text-secondary);
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 10;
+    height: 100%;
 }
 .toggle-password:hover {
     color: var(--text-primary);
 }
-
 
 /* --- 5. 状态与按钮 --- */
 .status-area {
@@ -240,4 +236,62 @@ input[type="password"]::-ms-clear {
     width: clamp(16px, 2.5vw, 18px);
     height: clamp(16px, 2.5vw, 18px);
     display: block;
+}
+
+/* --- 模态框样式 --- */
+#modal-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.6);
+    z-index: 100;
+}
+#modal {
+    position: fixed;
+    top: 40%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: var(--background-card);
+    padding: 1.5rem;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+    z-index: 101;
+    width: 90%;
+    max-width: 450px;
+    border: 1px solid var(--border-color);
+}
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.8rem;
+    margin-bottom: 1rem;
+}
+.modal-header h2 {
+    margin: 0;
+    font-size: var(--font-size-h2);
+    border: none;
+    padding: 0;
+}
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.8rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+    line-height: 1;
+}
+.modal-body {
+    margin-bottom: 1.5rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+.modal-footer {
+    text-align: right;
+}
+.modal-footer .btn {
+    min-width: 80px;
 }

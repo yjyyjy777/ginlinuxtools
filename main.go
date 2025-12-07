@@ -6,6 +6,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -146,40 +147,41 @@ func (a *App) StartDeploy(host, port, user, pass, localPort, remotePort string) 
 
 	a.logUI("🚀 正在连接服务器...")
 
+	// 直接执行部署流程，不再放到 goroutine 中
+	err := a.runDeployProcess(host, port, user, pass, localPort, remotePort)
+	if err != nil {
+		// 如果连接或部署失败，立即将错误返回给前端
+		a.logUI(fmt.Sprintf("❌ 开始失败: %s", err.Error()))
+		a.updateStatus(false, "", "")
+		return err
+	}
+
+	// 只有在成功后才更新状态和 UI
+	a.isRunning = true
+	a.currentLocalPort = localPort
+	a.logUI(fmt.Sprintf("✅ 运行中 | 本地: %s <-> 远端: %s", localPort, remotePort))
+	a.updateStatus(true, localPort, remotePort)
+
+	// 构造当前连接配置
+	profile := ConnectionProfile{
+		Name:       fmt.Sprintf("%s@%s", user, host),
+		Host:       host,
+		Port:       port,
+		User:       user,
+		Password:   pass,
+		LocalPort:  localPort,
+		RemotePort: remotePort,
+	}
+
+	// 在后台保存历史记录和打开浏览器，不阻塞主流程
 	go func() {
-		err := a.runDeployProcess(host, port, user, pass, localPort, remotePort)
-		if err != nil {
-			a.logUI(fmt.Sprintf("❌ 部署失败: %s", err.Error()))
-			a.updateStatus(false, "", "")
-			return
-		}
-
-		a.isRunning = true
-		a.currentLocalPort = localPort
-		a.logUI(fmt.Sprintf("✅ 运行中 | 本地: %s <-> 远端: %s", localPort, remotePort))
-		a.updateStatus(true, localPort, remotePort)
-
-		// 构造当前连接配置
-		profile := ConnectionProfile{
-			Name:       fmt.Sprintf("%s@%s", user, host),
-			Host:       host,
-			Port:       port,
-			User:       user,
-			Password:   pass,
-			LocalPort:  localPort,
-			RemotePort: remotePort,
-		}
-
-		// 保存并刷新前端列表
 		if err := a.saveHistory(profile); err != nil {
 			a.logUI("⚠️ 警告: 保存历史记录失败")
 		} else {
-			// 保存成功后，立即重新读取并推送到前端
 			if history, err := a.GetHistory(); err == nil {
 				wailsruntime.EventsEmit(a.ctx, "history:loaded", history)
 			}
 		}
-
 		a.OpenBrowser()
 	}()
 
@@ -255,7 +257,21 @@ func (a *App) runDeployProcess(host, port, user, pass, localPort, remotePort str
 	}
 	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%s", host, port), config)
 	if err != nil {
-		return err
+		// --- 核心错误判断逻辑 ---
+		var netErr net.Error
+		if errors.As(err, &netErr) {
+			if netErr.Timeout() {
+				return fmt.Errorf("网络连接超时：无法在规定时间内连接到服务器。请检查网络或防火墙设置")
+			}
+			return fmt.Errorf("网络错误：无法连接到服务器。请检查主机地址、端口和网络连通性")
+		}
+
+		errorString := strings.ToLower(err.Error())
+		if strings.Contains(errorString, "permission denied") || strings.Contains(errorString, "unable to authenticate") {
+			return fmt.Errorf("认证失败：用户名或密码不正确")
+		}
+
+		return fmt.Errorf("未知连接错误: %v", err)
 	}
 	a.sshClient = client
 

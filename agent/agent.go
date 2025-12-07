@@ -924,18 +924,41 @@ func executeSQL(c *gin.Context) {
 }
 
 // --------------------------------------------------------------------------------
-// 代理逻辑 (适配 Gin & 修复 MinIO 路径与WebSocket问题)
+// 代理逻辑 (最终完美版：Base标签注入 + Cookie SameSite修复)
 // --------------------------------------------------------------------------------
 func setupGinProxies(r *gin.Engine) {
-	// Loading HTML
-
-	// Helper to create rewrite logic with a specific base path
+	// Helper: 响应重写逻辑
 	createRewriteFunc := func(basePath string) func(*http.Response) error {
 		return func(resp *http.Response) error {
+			// 1. 清除安全头，允许 iframe 加载
 			resp.Header.Del("X-Frame-Options")
 			resp.Header.Del("Content-Security-Policy")
+
+			// 2. 修复重定向 Location
+			if location := resp.Header.Get("Location"); location != "" {
+				if strings.HasPrefix(location, "/") {
+					resp.Header.Set("Location", basePath+strings.TrimPrefix(location, "/"))
+				}
+			}
+
+			// 3. 【解决 Tracking Prevention】强制 Cookie 策略
+			// 浏览器拦截 iframe 存储是因为缺少 SameSite=None 和 Secure
+			cookies := resp.Cookies()
+			if len(cookies) > 0 {
+				resp.Header.Del("Set-Cookie")
+				for _, cookie := range cookies {
+					cookie.Path = "/"
+					// 必须设置为 None + Secure，否则 HTTPS 下的 iframe 会被浏览器拦截 Storage
+					cookie.SameSite = http.SameSiteNoneMode
+					cookie.Secure = true
+					cookie.HttpOnly = false
+					resp.Header.Add("Set-Cookie", cookie.String())
+				}
+			}
+
+			// 4. 重写 HTML Body
 			contentType := resp.Header.Get("Content-Type")
-			if strings.Contains(contentType, "text/html") || strings.Contains(contentType, "application/javascript") || strings.Contains(contentType, "text/css") {
+			if strings.Contains(contentType, "text/html") {
 				bodyBytes, err := io.ReadAll(resp.Body)
 				if err != nil {
 					return err
@@ -943,10 +966,23 @@ func setupGinProxies(r *gin.Engine) {
 				_ = resp.Body.Close()
 				bodyString := string(bodyBytes)
 
-				// Fix for SPA Assets: Use Absolute Paths with Proxy Prefix
+				// 【终极 404 修复方案】注入 Base Tag
+				// MinIO 默认有 <base href="/">，我们把它改成代理路径
+				// 这样浏览器会自动把所有 css/js/svg 请求加上前缀，不再需要替换 src/href
+				if strings.Contains(bodyString, `<base href="/">`) {
+					bodyString = strings.Replace(bodyString, `<base href="/">`, `<base href="`+basePath+`">`, 1)
+				} else {
+					// 如果没有 base 标签，手动在 <head> 后插入一个
+					bodyString = strings.Replace(bodyString, `<head>`, `<head><base href="`+basePath+`">`, 1)
+				}
+
+				// 辅助替换：修复一些写死绝对路径的资源 (MinIO 的 loader.svg 有时是绝对路径)
 				bodyString = strings.ReplaceAll(bodyString, `src="/`, `src="`+basePath)
 				bodyString = strings.ReplaceAll(bodyString, `href="/`, `href="`+basePath)
-				bodyString = strings.ReplaceAll(bodyString, `action="/`, `action="`+basePath)
+
+				// MinIO 特殊 JS 路径修复
+				bodyString = strings.ReplaceAll(bodyString, `"/api/v1/`, `"`+basePath+`api/v1/`)
+				bodyString = strings.ReplaceAll(bodyString, `'ws://'`, `'ws://'+window.location.host+'`+basePath)
 
 				buf := bytes.NewBufferString(bodyString)
 				resp.Body = io.NopCloser(buf)
@@ -957,7 +993,7 @@ func setupGinProxies(r *gin.Engine) {
 		}
 	}
 
-	// RabbitMQ Proxy
+	// --- RabbitMQ Proxy ---
 	if appConfig.RabbitMQAdminPort > 0 {
 		rabbitURL, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", appConfig.RabbitMQAdminPort))
 		proxy := httputil.NewSingleHostReverseProxy(rabbitURL)
@@ -966,19 +1002,15 @@ func setupGinProxies(r *gin.Engine) {
 			req.URL.Scheme = rabbitURL.Scheme
 			req.URL.Host = rabbitURL.Host
 			req.URL.Path = strings.TrimPrefix(req.URL.Path, "/api/baseservices/rabbitmq")
-
-			// FIX: RabbitMQ might check origin for API calls
+			req.URL.RawPath = ""
 			req.Host = rabbitURL.Host
 			if req.Header.Get("Origin") != "" {
 				req.Header.Set("Origin", fmt.Sprintf("%s://%s", rabbitURL.Scheme, rabbitURL.Host))
 			}
-
 			req.Header.Del("Accept-Encoding")
 		}
-
 		r.Any("/api/baseservices/rabbitmq/*path", func(c *gin.Context) {
-			path := c.Param("path")
-			if path == "" {
+			if c.Param("path") == "/" && !strings.HasSuffix(c.Request.URL.Path, "/") {
 				c.Redirect(http.StatusMovedPermanently, "/api/baseservices/rabbitmq/")
 				return
 			}
@@ -986,33 +1018,47 @@ func setupGinProxies(r *gin.Engine) {
 		})
 	}
 
-	// MinIO Proxy (Fix for SPA Loading & WebSocket 403)
+	// --- MinIO Proxy (Target Console Port 9001) ---
 	targetMinio := "http://127.0.0.1:9001"
 	if appConfig.MinioURL != "" && !strings.Contains(appConfig.MinioURL, ":9000") {
 		targetMinio = appConfig.MinioURL
 	}
+
 	minioURL, err := url.Parse(targetMinio)
 	if err == nil {
 		minioProxy := httputil.NewSingleHostReverseProxy(minioURL)
 		minioProxy.ModifyResponse = createRewriteFunc("/api/baseservices/minio/")
+
 		minioProxy.Director = func(req *http.Request) {
 			req.URL.Scheme = minioURL.Scheme
 			req.URL.Host = minioURL.Host
-			req.Host = minioURL.Host // Important for MinIO
+			req.Host = minioURL.Host
 
-			// FIX: Rewrite Origin to target to bypass MinIO's CORS/Cross-site WebSocket check
-			if req.Header.Get("Origin") != "" {
-				targetOrigin := fmt.Sprintf("%s://%s", minioURL.Scheme, minioURL.Host)
-				req.Header.Set("Origin", targetOrigin)
+			// 路径裁剪 (Robust)
+			path := req.URL.Path
+			if strings.HasPrefix(path, "/api/baseservices/minio") {
+				path = strings.TrimPrefix(path, "/api/baseservices/minio")
+			}
+			if path == "" {
+				path = "/"
 			}
 
+			req.URL.Path = path
+			req.URL.RawPath = "" // 必须清空
+
+			// WebSocket 支持
+			if req.Header.Get("Connection") == "Upgrade" {
+				req.Header.Set("Connection", "Upgrade")
+				req.Header.Set("Upgrade", "websocket")
+			}
+
+			req.Header.Set("Origin", fmt.Sprintf("%s://%s", minioURL.Scheme, minioURL.Host))
 			req.Header.Del("Accept-Encoding")
-			req.URL.Path = strings.TrimPrefix(req.URL.Path, "/api/baseservices/minio")
 		}
 
 		r.Any("/api/baseservices/minio/*path", func(c *gin.Context) {
 			path := c.Param("path")
-			if path == "" {
+			if (path == "" || path == "/") && !strings.HasSuffix(c.Request.URL.Path, "/") {
 				c.Redirect(http.StatusMovedPermanently, "/api/baseservices/minio/")
 				return
 			}
