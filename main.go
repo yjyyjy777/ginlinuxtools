@@ -260,15 +260,29 @@ func (a *App) runDeployProcess(host, port, user, pass, localPort, remotePort str
 		// --- 核心错误判断逻辑 ---
 		var netErr net.Error
 		if errors.As(err, &netErr) {
+			var errMsg string
 			if netErr.Timeout() {
-				return fmt.Errorf("网络连接超时：无法在规定时间内连接到服务器。请检查网络或防火墙设置")
+				errMsg = "网络连接超时：无法在规定时间内连接到服务器。请检查网络或防火墙设置。"
+			} else {
+				errMsg = "网络错误：无法连接到服务器。请检查主机地址、端口和网络连通性。"
 			}
-			return fmt.Errorf("网络错误：无法连接到服务器。请检查主机地址、端口和网络连通性")
+			wailsruntime.MessageDialog(a.ctx, wailsruntime.MessageDialogOptions{
+				Type:    wailsruntime.ErrorDialog,
+				Title:   "网络错误",
+				Message: errMsg,
+			})
+			return fmt.Errorf(errMsg)
 		}
 
 		errorString := strings.ToLower(err.Error())
 		if strings.Contains(errorString, "permission denied") || strings.Contains(errorString, "unable to authenticate") {
-			return fmt.Errorf("认证失败：用户名或密码不正确")
+			errMsg := "认证失败：用户名或密码不正确。"
+			wailsruntime.MessageDialog(a.ctx, wailsruntime.MessageDialogOptions{
+				Type:    wailsruntime.ErrorDialog,
+				Title:   "认证失败",
+				Message: errMsg,
+			})
+			return fmt.Errorf(errMsg)
 		}
 
 		return fmt.Errorf("未知连接错误: %v", err)
